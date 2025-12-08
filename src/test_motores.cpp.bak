@@ -1,0 +1,92 @@
+// Guardar el código actual como backup
+// Renombrar main.cpp a main.cpp.bak y este archivo a main.cpp para probar
+#include <Arduino.h>
+
+// Pines L298N
+#define MOTOR_IZQ_IN1 8
+#define MOTOR_IZQ_IN2 9
+#define MOTOR_DER_IN3 10
+#define MOTOR_DER_IN4 7
+
+void setup() {
+  Serial.begin(9600);
+  
+  pinMode(MOTOR_IZQ_IN1, OUTPUT);
+  pinMode(MOTOR_IZQ_IN2, OUTPUT);
+  pinMode(MOTOR_DER_IN3, OUTPUT);
+  pinMode(MOTOR_DER_IN4, OUTPUT);
+  
+  Serial.println("Test de motores iniciado");
+  Serial.println("Esperando 2 segundos...");
+  delay(2000);
+}
+
+void loop() {
+  // Test Motor IZQUIERDO avanza
+  Serial.println("\n--- MOTOR IZQUIERDO AVANZA ---");
+  analogWrite(MOTOR_IZQ_IN1, 200);
+  analogWrite(MOTOR_IZQ_IN2, 0);
+  analogWrite(MOTOR_DER_IN3, 0);
+  analogWrite(MOTOR_DER_IN4, 0);
+  delay(2000);
+  
+  // Detener
+  Serial.println("DETENER");
+  analogWrite(MOTOR_IZQ_IN1, 0);
+  analogWrite(MOTOR_IZQ_IN2, 0);
+  delay(1000);
+  
+  // Test Motor IZQUIERDO retrocede
+  Serial.println("\n--- MOTOR IZQUIERDO RETROCEDE ---");
+  analogWrite(MOTOR_IZQ_IN1, 0);
+  analogWrite(MOTOR_IZQ_IN2, 200);
+  delay(2000);
+  
+  // Detener
+  Serial.println("DETENER");
+  analogWrite(MOTOR_IZQ_IN1, 0);
+  analogWrite(MOTOR_IZQ_IN2, 0);
+  delay(1000);
+  
+  // Test Motor DERECHO avanza
+  Serial.println("\n--- MOTOR DERECHO AVANZA ---");
+  analogWrite(MOTOR_DER_IN3, 200);
+  analogWrite(MOTOR_DER_IN4, 0);
+  delay(2000);
+  
+  // Detener
+  Serial.println("DETENER");
+  analogWrite(MOTOR_DER_IN3, 0);
+  analogWrite(MOTOR_DER_IN4, 0);
+  delay(1000);
+  
+  // Test Motor DERECHO retrocede
+  Serial.println("\n--- MOTOR DERECHO RETROCEDE ---");
+  analogWrite(MOTOR_DER_IN3, 0);
+  analogWrite(MOTOR_DER_IN4, 200);
+  delay(2000);
+  
+  // Detener
+  Serial.println("DETENER");
+  analogWrite(MOTOR_DER_IN3, 0);
+  analogWrite(MOTOR_DER_IN4, 0);
+  delay(1000);
+  
+  // Test AMBOS motores
+  Serial.println("\n--- AMBOS MOTORES AVANZAR ---");
+  analogWrite(MOTOR_IZQ_IN1, 200);
+  analogWrite(MOTOR_IZQ_IN2, 0);
+  analogWrite(MOTOR_DER_IN3, 200);
+  analogWrite(MOTOR_DER_IN4, 0);
+  delay(3000);
+  
+  // Detener todo
+  Serial.println("DETENER TODO");
+  analogWrite(MOTOR_IZQ_IN1, 0);
+  analogWrite(MOTOR_IZQ_IN2, 0);
+  analogWrite(MOTOR_DER_IN3, 0);
+  analogWrite(MOTOR_DER_IN4, 0);
+  
+  Serial.println("\n=== Test completado. Reiniciando en 3 segundos ===\n");
+  delay(3000);
+}
