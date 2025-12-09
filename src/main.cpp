@@ -9,11 +9,11 @@
 // Pines L298N conectados al Shield V5
 // Motor Izquierdo
 #define MOTOR_IZQ_IN1 8   // Dirección
-#define MOTOR_IZQ_IN2 9   // Dirección
+#define MOTOR_IZQ_IN2 2   // Dirección (movido a pin 2)
 #define MOTOR_IZQ_ENA 5   // PWM velocidad (Shield pin 5)
 
 // Motor Derecho
-#define MOTOR_DER_IN3 10  // Dirección
+#define MOTOR_DER_IN3 4   // Dirección (movido a pin 4)
 #define MOTOR_DER_IN4 7   // Dirección
 #define MOTOR_DER_ENB 6   // PWM velocidad (Shield pin 6)
 
@@ -22,6 +22,10 @@
 #define VELOCIDAD_MINIMA 100   // Velocidad inicial
 #define VELOCIDAD_MAXIMA 160   // Velocidad máxima
 #define VELOCIDAD_GIRO 120     // Velocidad de giro
+
+// Tiempos de giro (en milisegundos)
+#define TIEMPO_GIRO_90  450    // ~90-100 grados
+#define TIEMPO_GIRO_60  250    // ~55-60 grados
 
 // Factores de corrección (motor izquierdo más rápido)
 #define FACTOR_MOTOR_IZQ 0.90  // Reducido porque es más rápido
@@ -34,6 +38,7 @@ long distancia = 0;
 
 // Declaración de funciones
 long medirDistancia();
+long medirDistanciaPrecisa();
 void avanzarConVelocidad(int velocidad);
 void retroceder();
 void girarDerecha();
@@ -64,46 +69,84 @@ void setup() {
   Serial.println("🤖 Robot 2 Ruedas - Iniciando...");
   delay(1000);
   
-  // ESCANEO INICIAL: Buscar mejor dirección al arrancar
-  Serial.println("🔍 Escaneo inicial 360°");
+  // ESCANEO INICIAL: Buscar mejor dirección al arrancar (5 posiciones)
+  Serial.println("🔍 Escaneo inicial 360° (5 posiciones)");
+  
+  servoSensor.write(0);  // Extremo derecha
+  delay(600);
+  int dist0 = medirDistanciaPrecisa();
+  Serial.print("  0° (der): ");
+  Serial.print(dist0);
+  Serial.println(" cm");
+  
+  servoSensor.write(45);  // Diagonal derecha
+  delay(600);
+  int dist45 = medirDistanciaPrecisa();
+  Serial.print("  45°: ");
+  Serial.print(dist45);
+  Serial.println(" cm");
   
   servoSensor.write(90);  // Frente
-  delay(500);
-  int distFrente = medirDistancia();
-  Serial.print("  Frente: ");
-  Serial.print(distFrente);
+  delay(600);
+  int dist90 = medirDistanciaPrecisa();
+  Serial.print("  90° (frente): ");
+  Serial.print(dist90);
   Serial.println(" cm");
   
-  servoSensor.write(10);  // Derecha
-  delay(500);
-  int distDerecha = medirDistancia();
-  Serial.print("  Derecha: ");
-  Serial.print(distDerecha);
+  servoSensor.write(135);  // Diagonal izquierda
+  delay(600);
+  int dist135 = medirDistanciaPrecisa();
+  Serial.print("  135°: ");
+  Serial.print(dist135);
   Serial.println(" cm");
   
-  servoSensor.write(170);  // Izquierda
-  delay(500);
-  int distIzquierda = medirDistancia();
-  Serial.print("  Izquierda: ");
-  Serial.print(distIzquierda);
+  servoSensor.write(180);  // Extremo izquierda
+  delay(600);
+  int dist180 = medirDistanciaPrecisa();
+  Serial.print("  180° (izq): ");
+  Serial.print(dist180);
   Serial.println(" cm");
   
   servoSensor.write(90);  // Volver al centro
-  delay(500);
+  delay(600);
   
-  // Girar hacia donde hay más espacio
-  if (distDerecha > distFrente && distDerecha > distIzquierda) {
-    Serial.println("↪️ Orientándose a la DERECHA");
+  // Encontrar mejor dirección
+  int maxDist = dist0;
+  int mejorAngulo = 0;
+  if (dist45 > maxDist) { maxDist = dist45; mejorAngulo = 45; }
+  if (dist90 > maxDist) { maxDist = dist90; mejorAngulo = 90; }
+  if (dist135 > maxDist) { maxDist = dist135; mejorAngulo = 135; }
+  if (dist180 > maxDist) { maxDist = dist180; mejorAngulo = 180; }
+  
+  Serial.print("✅ Mejor dirección inicial: ");
+  Serial.print(mejorAngulo);
+  Serial.print("° con ");
+  Serial.print(maxDist);
+  Serial.println(" cm");
+  
+  // Girar según mejor ángulo detectado
+  if (mejorAngulo == 0) {
+    Serial.println("↪️ Orientándose 90° DERECHA");
     girarDerecha();
-    delay(400);
+    delay(TIEMPO_GIRO_90);
     detener();
-  } else if (distIzquierda > distFrente && distIzquierda > distDerecha) {
-    Serial.println("↩️ Orientándose a la IZQUIERDA");
-    girarIzquierda();
-    delay(400);
+  } else if (mejorAngulo == 45) {
+    Serial.println("↪️ Orientándose 60° DERECHA");
+    girarDerecha();
+    delay(TIEMPO_GIRO_60);
     detener();
-  } else {
+  } else if (mejorAngulo == 90) {
     Serial.println("⬆️ Frente tiene más espacio");
+  } else if (mejorAngulo == 135) {
+    Serial.println("↩️ Orientándose 60° IZQUIERDA");
+    girarIzquierda();
+    delay(TIEMPO_GIRO_60);
+    detener();
+  } else if (mejorAngulo == 180) {
+    Serial.println("↩️ Orientándose 90° IZQUIERDA");
+    girarIzquierda();
+    delay(TIEMPO_GIRO_90);
+    detener();
   }
   
   delay(1000);
@@ -149,28 +192,56 @@ void loop() {
       detener();
       delay(300);
       
-      // Scan de emergencia
-      Serial.println("🔍 Scan después de bloqueo...");
-      servoSensor.write(10);
-      delay(400);
-      int distDer = medirDistancia();
+      // Scan de emergencia (5 posiciones)
+      Serial.println("🔍 Scan completo después de bloqueo...");
       
-      servoSensor.write(170);
-      delay(400);
-      int distIzq = medirDistancia();
+      servoSensor.write(0);
+      delay(600);
+      int dist0 = medirDistanciaPrecisa();
+      Serial.print("  0°: "); Serial.print(dist0); Serial.println(" cm");
+      
+      servoSensor.write(45);
+      delay(600);
+      int dist45 = medirDistanciaPrecisa();
+      Serial.print("  45°: "); Serial.print(dist45); Serial.println(" cm");
       
       servoSensor.write(90);
-      delay(300);
+      delay(600);
+      int dist90 = medirDistanciaPrecisa();
+      Serial.print("  90°: "); Serial.print(dist90); Serial.println(" cm");
       
-      // Girar 120° hacia mejor lado
-      if (distDer > distIzq) {
-        Serial.println("↪️ Girando DERECHA para evitar bloqueo");
-        girarDerecha();
-        delay(600);
-      } else {
-        Serial.println("↩️ Girando IZQUIERDA para evitar bloqueo");
-        girarIzquierda();
-        delay(600);
+      servoSensor.write(135);
+      delay(600);
+      int dist135 = medirDistanciaPrecisa();
+      Serial.print("  135°: "); Serial.print(dist135); Serial.println(" cm");
+      
+      servoSensor.write(180);
+      delay(600);
+      int dist180 = medirDistanciaPrecisa();
+      Serial.print("  180°: "); Serial.print(dist180); Serial.println(" cm");
+      
+      servoSensor.write(90);
+      delay(500);
+      
+      // Encontrar mejor dirección
+      int maxDist = dist0;
+      int mejorAngulo = 0;
+      if (dist45 > maxDist) { maxDist = dist45; mejorAngulo = 45; }
+      if (dist90 > maxDist) { maxDist = dist90; mejorAngulo = 90; }
+      if (dist135 > maxDist) { maxDist = dist135; mejorAngulo = 135; }
+      if (dist180 > maxDist) { maxDist = dist180; mejorAngulo = 180; }
+      
+      Serial.print("✅ Mejor: "); Serial.print(mejorAngulo); Serial.println("°");
+      
+      // Girar según mejor ángulo
+      if (mejorAngulo == 0) {
+        girarDerecha(); delay(TIEMPO_GIRO_90);
+      } else if (mejorAngulo == 45) {
+        girarDerecha(); delay(TIEMPO_GIRO_60);
+      } else if (mejorAngulo == 135) {
+        girarIzquierda(); delay(TIEMPO_GIRO_60);
+      } else if (mejorAngulo == 180) {
+        girarIzquierda(); delay(TIEMPO_GIRO_90);
       }
       detener();
       delay(300);
@@ -203,28 +274,56 @@ void loop() {
         detener();
         delay(300);
         
-        // Escanear
-        Serial.println("🔍 Escaneando después de atasco...");
-        servoSensor.write(10);
-        delay(400);
-        int distDer = medirDistancia();
+        // Escanear (5 posiciones)
+        Serial.println("🔍 Scan completo después de atasco...");
         
-        servoSensor.write(170);
-        delay(400);
-        int distIzq = medirDistancia();
+        servoSensor.write(0);
+        delay(600);
+        int dist0 = medirDistanciaPrecisa();
+        Serial.print("  0°: "); Serial.print(dist0); Serial.println(" cm");
+        
+        servoSensor.write(45);
+        delay(600);
+        int dist45 = medirDistanciaPrecisa();
+        Serial.print("  45°: "); Serial.print(dist45); Serial.println(" cm");
         
         servoSensor.write(90);
-        delay(300);
+        delay(600);
+        int dist90 = medirDistanciaPrecisa();
+        Serial.print("  90°: "); Serial.print(dist90); Serial.println(" cm");
         
-        // Girar 180° hacia el lado con más espacio
-        if (distDer > distIzq) {
-          Serial.println("↪️ Girando 180° a la DERECHA");
-          girarDerecha();
-          delay(800);
-        } else {
-          Serial.println("↩️ Girando 180° a la IZQUIERDA");
-          girarIzquierda();
-          delay(800);
+        servoSensor.write(135);
+        delay(600);
+        int dist135 = medirDistanciaPrecisa();
+        Serial.print("  135°: "); Serial.print(dist135); Serial.println(" cm");
+        
+        servoSensor.write(180);
+        delay(600);
+        int dist180 = medirDistanciaPrecisa();
+        Serial.print("  180°: "); Serial.print(dist180); Serial.println(" cm");
+        
+        servoSensor.write(90);
+        delay(500);
+        
+        // Encontrar mejor dirección
+        int maxDist = dist0;
+        int mejorAngulo = 0;
+        if (dist45 > maxDist) { maxDist = dist45; mejorAngulo = 45; }
+        if (dist90 > maxDist) { maxDist = dist90; mejorAngulo = 90; }
+        if (dist135 > maxDist) { maxDist = dist135; mejorAngulo = 135; }
+        if (dist180 > maxDist) { maxDist = dist180; mejorAngulo = 180; }
+        
+        Serial.print("✅ Mejor: "); Serial.print(mejorAngulo); Serial.println("°");
+        
+        // Girar según mejor ángulo
+        if (mejorAngulo == 0) {
+          girarDerecha(); delay(TIEMPO_GIRO_90);
+        } else if (mejorAngulo == 45) {
+          girarDerecha(); delay(TIEMPO_GIRO_60);
+        } else if (mejorAngulo == 135) {
+          girarIzquierda(); delay(TIEMPO_GIRO_60);
+        } else if (mejorAngulo == 180) {
+          girarIzquierda(); delay(TIEMPO_GIRO_90);
         }
         detener();
         delay(300);
@@ -257,32 +356,56 @@ void loop() {
       detener();
       delay(300);
       
-      // Escanear para salir
-      Serial.println("🔍 Scan de emergencia...");
-      servoSensor.write(10);
-      delay(400);
-      int distDer = medirDistancia();
-      Serial.print("  Derecha: ");
-      Serial.println(distDer);
+      // Escanear para salir (5 posiciones)
+      Serial.println("🔍 Scan completo de emergencia...");
       
-      servoSensor.write(170);
-      delay(400);
-      int distIzq = medirDistancia();
-      Serial.print("  Izquierda: ");
-      Serial.println(distIzq);
+      servoSensor.write(0);
+      delay(600);
+      int dist0 = medirDistanciaPrecisa();
+      Serial.print("  0°: "); Serial.print(dist0); Serial.println(" cm");
+      
+      servoSensor.write(45);
+      delay(600);
+      int dist45 = medirDistanciaPrecisa();
+      Serial.print("  45°: "); Serial.print(dist45); Serial.println(" cm");
       
       servoSensor.write(90);
-      delay(300);
+      delay(600);
+      int dist90 = medirDistanciaPrecisa();
+      Serial.print("  90°: "); Serial.print(dist90); Serial.println(" cm");
       
-      // Girar 180° hacia mejor lado
-      if (distDer > distIzq) {
-        Serial.println("↪️ Girando 180° DERECHA");
-        girarDerecha();
-        delay(800);
-      } else {
-        Serial.println("↩️ Girando 180° IZQUIERDA");
-        girarIzquierda();
-        delay(800);
+      servoSensor.write(135);
+      delay(600);
+      int dist135 = medirDistanciaPrecisa();
+      Serial.print("  135°: "); Serial.print(dist135); Serial.println(" cm");
+      
+      servoSensor.write(180);
+      delay(600);
+      int dist180 = medirDistanciaPrecisa();
+      Serial.print("  180°: "); Serial.print(dist180); Serial.println(" cm");
+      
+      servoSensor.write(90);
+      delay(500);
+      
+      // Encontrar mejor dirección
+      int maxDist = dist0;
+      int mejorAngulo = 0;
+      if (dist45 > maxDist) { maxDist = dist45; mejorAngulo = 45; }
+      if (dist90 > maxDist) { maxDist = dist90; mejorAngulo = 90; }
+      if (dist135 > maxDist) { maxDist = dist135; mejorAngulo = 135; }
+      if (dist180 > maxDist) { maxDist = dist180; mejorAngulo = 180; }
+      
+      Serial.print("✅ Mejor: "); Serial.print(mejorAngulo); Serial.println("°");
+      
+      // Girar según mejor ángulo
+      if (mejorAngulo == 0) {
+        girarDerecha(); delay(TIEMPO_GIRO_90);
+      } else if (mejorAngulo == 45) {
+        girarDerecha(); delay(TIEMPO_GIRO_60);
+      } else if (mejorAngulo == 135) {
+        girarIzquierda(); delay(TIEMPO_GIRO_60);
+      } else if (mejorAngulo == 180) {
+        girarIzquierda(); delay(TIEMPO_GIRO_90);
       }
       detener();
       delay(300);
@@ -336,47 +459,92 @@ void loop() {
     detener();
     delay(300);
     
-    // 4. ESCANEAR: medir frente, derecha e izquierda
-    Serial.println("🔍 Escaneando 360°...");
+    // 4. ESCANEAR: medir 5 posiciones para mayor precisión
+    Serial.println("🔍 Escaneando 360° (5 posiciones)...");
+    
+    servoSensor.write(0);  // Extremo derecha
+    delay(600);
+    int dist0 = medirDistanciaPrecisa();
+    Serial.print("  0° (der): ");
+    Serial.print(dist0);
+    Serial.println(" cm");
+    
+    servoSensor.write(45);  // Derecha diagonal
+    delay(600);
+    int dist45 = medirDistanciaPrecisa();
+    Serial.print("  45°: ");
+    Serial.print(dist45);
+    Serial.println(" cm");
     
     servoSensor.write(90);  // Frente
-    delay(400);
-    int distFrente = medirDistancia();
-    Serial.print("  Frente: ");
-    Serial.print(distFrente);
+    delay(600);
+    int dist90 = medirDistanciaPrecisa();
+    Serial.print("  90° (frente): ");
+    Serial.print(dist90);
     Serial.println(" cm");
     
-    servoSensor.write(10);  // Derecha
-    delay(400);
-    int distDerecha = medirDistancia();
-    Serial.print("  Derecha: ");
-    Serial.print(distDerecha);
+    servoSensor.write(135);  // Izquierda diagonal
+    delay(600);
+    int dist135 = medirDistanciaPrecisa();
+    Serial.print("  135°: ");
+    Serial.print(dist135);
     Serial.println(" cm");
     
-    servoSensor.write(170);  // Izquierda
-    delay(400);
-    int distIzquierda = medirDistancia();
-    Serial.print("  Izquierda: ");
-    Serial.print(distIzquierda);
+    servoSensor.write(180);  // Extremo izquierda
+    delay(600);
+    int dist180 = medirDistanciaPrecisa();
+    Serial.print("  180° (izq): ");
+    Serial.print(dist180);
     Serial.println(" cm");
     
     servoSensor.write(90);  // Volver al centro
-    delay(300);
+    delay(500);
     
-    // 5. GIRAR hacia donde hay MAYOR distancia
-    if (distFrente >= distDerecha && distFrente >= distIzquierda) {
-      Serial.println("⬆️ Mejor dirección: FRENTE");
-      // No girar, ya está bien orientado
-    } else if (distDerecha > distIzquierda) {
-      Serial.println("↪️ Girando a la DERECHA");
+    // 5. ENCONTRAR la dirección con MAYOR distancia
+    int maxDist = dist0;
+    int mejorAngulo = 0;
+    
+    if (dist45 > maxDist) { maxDist = dist45; mejorAngulo = 45; }
+    if (dist90 > maxDist) { maxDist = dist90; mejorAngulo = 90; }
+    if (dist135 > maxDist) { maxDist = dist135; mejorAngulo = 135; }
+    if (dist180 > maxDist) { maxDist = dist180; mejorAngulo = 180; }
+    
+    Serial.print("✅ Mejor dirección: ");
+    Serial.print(mejorAngulo);
+    Serial.print("° con ");
+    Serial.print(maxDist);
+    Serial.println(" cm");
+    
+    // Girar según el ángulo óptimo detectado
+    if (mejorAngulo == 90) {
+      Serial.println("⬆️ Frente está despejado");
+      // No girar
+    } else if (mejorAngulo == 0) {
+      // Girar 90° a la derecha
+      Serial.println("↪️ Girando 90° DERECHA");
       girarDerecha();
-      delay(400);  // ~90 grados
+      delay(TIEMPO_GIRO_90);
       detener();
       delay(200);
-    } else {
-      Serial.println("↩️ Girando a la IZQUIERDA");
+    } else if (mejorAngulo == 45) {
+      // Girar 60° a la derecha
+      Serial.println("↪️ Girando 60° DERECHA");
+      girarDerecha();
+      delay(TIEMPO_GIRO_60);
+      detener();
+      delay(200);
+    } else if (mejorAngulo == 135) {
+      // Girar 60° a la izquierda
+      Serial.println("↩️ Girando 60° IZQUIERDA");
       girarIzquierda();
-      delay(400);  // ~90 grados
+      delay(TIEMPO_GIRO_60);
+      detener();
+      delay(200);
+    } else if (mejorAngulo == 180) {
+      // Girar 90° a la izquierda
+      Serial.println("↩️ Girando 90° IZQUIERDA");
+      girarIzquierda();
+      delay(TIEMPO_GIRO_90);
       detener();
       delay(200);
     }
@@ -404,6 +572,19 @@ long medirDistancia() {
   if (dist == 0 || dist > 400) dist = 400;  // Límite máximo
   
   return dist;
+}
+
+// Medir distancia con PROMEDIO de 3 lecturas para mayor precisión
+long medirDistanciaPrecisa() {
+  long suma = 0;
+  int lecturas = 3;
+  
+  for (int i = 0; i < lecturas; i++) {
+    suma += medirDistancia();
+    delay(50);  // Pausa entre lecturas
+  }
+  
+  return suma / lecturas;
 }
 
 // Acelerar progresivamente
