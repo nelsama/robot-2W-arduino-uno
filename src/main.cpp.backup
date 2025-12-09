@@ -1,0 +1,441 @@
+#include <Arduino.h>
+#include <Servo.h>
+
+// Pines del sensor ultrasonico HC-SR04 (Shield V5)
+#define TRIGGER_PIN 12
+#define ECHO_PIN 13
+#define SERVO_PIN 11
+
+// Pines L298N conectados al Shield V5
+// Motor Izquierdo
+#define MOTOR_IZQ_IN1 8   // Dirección
+#define MOTOR_IZQ_IN2 9   // Dirección
+#define MOTOR_IZQ_ENA 5   // PWM velocidad (Shield pin 5)
+
+// Motor Derecho
+#define MOTOR_DER_IN3 10  // Dirección
+#define MOTOR_DER_IN4 7   // Dirección
+#define MOTOR_DER_ENB 6   // PWM velocidad (Shield pin 6)
+
+// Constantes
+#define DISTANCIA_MINIMA 25    // cm - Distancia de seguridad (reducida para avanzar más)
+#define DISTANCIA_CRITICA 15   // cm - Detención inmediata
+#define VELOCIDAD_MINIMA 100   // Velocidad inicial
+#define VELOCIDAD_MAXIMA 160   // Velocidad máxima (aumentada)
+#define VELOCIDAD_GIRO 120     // Velocidad de giro (aumentada)
+
+// Factores de corrección (ajustar si un motor es más rápido)
+#define FACTOR_MOTOR_IZQ 0.90  // Reducido porque es más rápido
+#define FACTOR_MOTOR_DER 1.0   // Motor derecho normal
+
+// Variables de control
+int velocidadActual = VELOCIDAD_MINIMA;
+int contadorAtasco = 0;  // Contador para detectar atasco
+long distanciaAnterior = 400;
+
+Servo servoSensor;
+long distancia = 0;
+
+// Declaración de funciones
+long medirDistancia();
+void avanzar();
+void avanzarConVelocidad(int velocidad);
+void retroceder();
+void girarDerecha();
+void girarIzquierda();
+void detener();
+int buscarMejorDireccion();
+void acelerarProgresivo();
+
+void setup() {
+  Serial.begin(9600);
+  
+  // Configurar pines del sensor
+  pinMode(TRIGGER_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  
+  // Configurar pines de motores
+  pinMode(MOTOR_IZQ_IN1, OUTPUT);
+  pinMode(MOTOR_IZQ_IN2, OUTPUT);
+  pinMode(MOTOR_IZQ_ENA, OUTPUT);
+  pinMode(MOTOR_DER_IN3, OUTPUT);
+  pinMode(MOTOR_DER_IN4, OUTPUT);
+  pinMode(MOTOR_DER_ENB, OUTPUT);
+  
+  // Inicializar servo
+  servoSensor.attach(SERVO_PIN);
+  servoSensor.write(90);  // Posición central
+  
+  delay(1000);
+  Serial.println("Robot iniciado");
+  
+  // Escaneo inicial para elegir mejor dirección al iniciar
+  Serial.println("🔍 Escaneo inicial...");
+  servoSensor.write(90);
+  delay(500);
+  long distFrente = medirDistancia();
+  Serial.print("Frente: ");
+  Serial.print(distFrente);
+  Serial.println(" cm");
+  
+  servoSensor.write(10);
+  delay(500);
+  long distDerecha = medirDistancia();
+  Serial.print("Derecha: ");
+  Serial.print(distDerecha);
+  Serial.println(" cm");
+  
+  servoSensor.write(170);
+  delay(500);
+  long distIzquierda = medirDistancia();
+  Serial.print("Izquierda: ");
+  Serial.print(distIzquierda);
+  Serial.println(" cm");
+  
+  // Girar hacia el lado con más espacio
+  servoSensor.write(90);
+  delay(300);
+  
+  if (distFrente < 30) {
+    if (distDerecha > distIzquierda) {
+      Serial.println("↪️ Girando DERECHA (inicio)");
+      digitalWrite(MOTOR_IZQ_IN1, HIGH);
+      digitalWrite(MOTOR_IZQ_IN2, LOW);
+      analogWrite(MOTOR_IZQ_ENA, VELOCIDAD_GIRO);
+      digitalWrite(MOTOR_DER_IN3, LOW);
+      digitalWrite(MOTOR_DER_IN4, HIGH);
+      analogWrite(MOTOR_DER_ENB, VELOCIDAD_GIRO);
+      delay(800);
+    } else {
+      Serial.println("↩️ Girando IZQUIERDA (inicio)");
+      digitalWrite(MOTOR_IZQ_IN1, LOW);
+      digitalWrite(MOTOR_IZQ_IN2, HIGH);
+      analogWrite(MOTOR_IZQ_ENA, VELOCIDAD_GIRO);
+      digitalWrite(MOTOR_DER_IN3, HIGH);
+      digitalWrite(MOTOR_DER_IN4, LOW);
+      analogWrite(MOTOR_DER_ENB, VELOCIDAD_GIRO);
+      delay(800);
+    }
+    detener();
+    delay(300);
+  }
+  
+  Serial.println("✅ Iniciando navegación autónoma");
+}
+
+void loop() {
+  // 1. MEDIR distancia al frente
+  distancia = medirDistancia();
+  
+  Serial.print("📏 Dist: ");
+  Serial.print(distancia);
+  Serial.println(" cm");
+    
+    // Detectar atasco INMEDIATO: sensor da 0 o muy cerca
+    if (distanciaReal == 0 || distanciaReal < 3) {
+      Serial.println("🚨 SENSOR BLOQUEADO/PEGADO - Escape inmediato!");
+      detener();
+      delay(100);
+      retroceder();
+      delay(450);  // Reducido a 450ms
+      detener();
+      delay(250);
+      
+      // Girar 180 grados
+      Serial.println("🔄 Girando 180°");
+      girarDerecha();
+      delay(1300);
+      detener();
+      delay(500);
+      
+      contadorAtasco = 0;
+      velocidadActual = VELOCIDAD_MINIMA;
+      distancia = 400;  // Resetear distancia
+    } else {
+      // Actualizar distancia solo si la lectura es válida
+      if (distanciaReal > 400) distanciaReal = 400;
+      distancia = distanciaReal;
+      
+      // Detectar atasco: si la distancia es muy corta
+      if (distancia < 8) {
+        contadorAtasco++;
+        
+        // Si está MUY pegado (< 5cm), escape inmediato
+      if (distancia < 5) {
+        Serial.println("🚨 PEGADO A LA PARED - Escape inmediato!");
+        detener();
+        delay(100);
+        retroceder();
+        delay(400);
+        detener();
+        delay(200);
+        
+        // Escanear para decidir hacia dónde girar
+        Serial.println("🔍 Escaneando direcciones...");
+        servoSensor.write(10);  // Derecha
+        delay(300);
+        int distDerecha = medirDistancia();
+        
+        servoSensor.write(170); // Izquierda
+        delay(300);
+        int distIzquierda = medirDistancia();
+        
+        servoSensor.write(90);  // Volver al centro
+        delay(200);
+        
+        // Girar hacia el lado con más espacio
+        if (distDerecha > distIzquierda) {
+          Serial.println("↪️ Más espacio a la DERECHA");
+          girarDerecha();
+          delay(700);
+        } else {
+          Serial.println("↩️ Más espacio a la IZQUIERDA");
+          girarIzquierda();
+          delay(700);
+        }
+        detener();
+        delay(300);
+          
+          contadorAtasco = 0;
+          velocidadActual = VELOCIDAD_MINIMA;
+        }
+        // Si está cerca, contador más agresivo (solo 2 lecturas)
+      else if (contadorAtasco > 2) {
+        Serial.println("⚠️ ROBOT ATASCADO - Rutina de escape");
+        detener();
+        delay(150);
+        retroceder();
+        delay(400);
+        detener();
+        delay(200);
+        
+        // Escanear para decidir hacia dónde girar
+        Serial.println("🔍 Escaneando direcciones...");
+        servoSensor.write(10);  // Derecha
+        delay(300);
+        int distDerecha = medirDistancia();
+        
+        servoSensor.write(170); // Izquierda
+        delay(300);
+        int distIzquierda = medirDistancia();
+        
+        servoSensor.write(90);  // Volver al centro
+        delay(200);
+        
+        // Girar hacia el lado con más espacio
+        if (distDerecha > distIzquierda) {
+          Serial.println("↪️ Más espacio a la DERECHA");
+          girarDerecha();
+          delay(700);
+        } else {
+          Serial.println("↩️ Más espacio a la IZQUIERDA");
+          girarIzquierda();
+          delay(700);
+        }
+        detener();
+        delay(300);
+          
+          contadorAtasco = 0;
+          velocidadActual = VELOCIDAD_MINIMA;
+        }
+      } else if (distancia > 25) {
+        // Si hay espacio, resetear contador
+        contadorAtasco = 0;
+      } else if (distancia > 15 && contadorAtasco > 0) {
+        // Reducir contador gradualmente
+        contadorAtasco--;
+      }
+    }
+    
+    Serial.print("Dist: ");
+    Serial.print(distancia);
+    Serial.print(" cm | Vel: ");
+    Serial.print(velocidadActual);
+    Serial.print(" | Atasco: ");
+    Serial.println(contadorAtasco);
+    
+    distanciaAnterior = distancia;
+  }
+  
+  // Decidir acción según distancia (sin pausas)
+  if (distancia > DISTANCIA_MINIMA) {
+    // Camino libre - acelerar progresivamente mientras avanza
+    acelerarProgresivo();
+    avanzarConVelocidad(velocidadActual);
+    
+  } else if (distancia > DISTANCIA_CRITICA) {
+    // Obstáculo cerca - reducir velocidad gradualmente
+    if (velocidadActual > VELOCIDAD_MINIMA) {
+      velocidadActual -= 10; // Desacelerar más suave
+      if (velocidadActual < VELOCIDAD_MINIMA) {
+        velocidadActual = VELOCIDAD_MINIMA;
+      }
+    }
+    avanzarConVelocidad(velocidadActual);
+    
+  } else if (distancia >= 8) {
+    // Obstáculo cerca - realizar maniobra de evasión normal
+    Serial.println("🛑 Obstáculo!");
+    detener();
+    velocidadActual = VELOCIDAD_MINIMA;
+    delay(200);
+    
+    // Retroceder
+    Serial.println("↩️ Retrocediendo");
+    retroceder();
+    delay(150);  // Retroceso mínimo
+    detener();
+    delay(150);
+    
+    // Buscar mejor dirección
+    int direccion = buscarMejorDireccion();
+    
+    if (direccion == 1) {
+      Serial.println("↪️ Girando DERECHA");
+      girarDerecha();
+      delay(700);  // Giro más amplio
+    } else {
+      Serial.println("↩️ Girando IZQUIERDA");
+      girarIzquierda();
+      delay(700);  // Giro más amplio
+    }
+    
+    detener();
+    delay(400);
+    contadorAtasco = 0;  // Resetear al hacer maniobra exitosa
+  } else {
+    // Si distancia < 8 cm, detener completamente y esperar rutina de atasco
+    detener();
+  }
+  
+  // Pequeña pausa para no saturar el procesador
+  delay(10);
+}
+
+// Medir distancia con sensor HC-SR04
+long medirDistancia() {
+  digitalWrite(TRIGGER_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIGGER_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIGGER_PIN, LOW);
+  
+  long duracion = pulseIn(ECHO_PIN, HIGH, 30000);  // Timeout 30ms
+  long dist = duracion * 0.034 / 2;
+  
+  if (dist == 0 || dist > 400) {
+    dist = 400;  // Fuera de rango
+  }
+  
+  return dist;
+}
+
+// Buscar la mejor dirección (derecha o izquierda)
+int buscarMejorDireccion() {
+  // Mirar a la derecha
+  servoSensor.write(10);
+  delay(500);
+  long distDerecha = medirDistancia();
+  Serial.print("Distancia derecha: ");
+  Serial.println(distDerecha);
+  
+  // Mirar a la izquierda
+  servoSensor.write(170);
+  delay(500);
+  long distIzquierda = medirDistancia();
+  Serial.print("Distancia izquierda: ");
+  Serial.println(distIzquierda);
+  
+  // Volver al centro
+  servoSensor.write(90);
+  delay(300);
+  
+  // Retornar mejor dirección: 1 = derecha, -1 = izquierda
+  return (distDerecha > distIzquierda) ? 1 : -1;
+}
+
+// Acelerar progresivamente
+void acelerarProgresivo() {
+  if (velocidadActual < VELOCIDAD_MAXIMA) {
+    velocidadActual += 5; // Incremento más rápido para avanzar mejor
+    if (velocidadActual > VELOCIDAD_MAXIMA) {
+      velocidadActual = VELOCIDAD_MAXIMA;
+    }
+  }
+}
+
+// Funciones de control de motores
+void avanzar() {
+  avanzarConVelocidad(VELOCIDAD_MAXIMA);
+}
+
+void avanzarConVelocidad(int velocidad) {
+  int velIzq = velocidad * FACTOR_MOTOR_IZQ;
+  int velDer = velocidad * FACTOR_MOTOR_DER;
+  
+  digitalWrite(MOTOR_IZQ_IN1, HIGH);
+  digitalWrite(MOTOR_IZQ_IN2, LOW);
+  analogWrite(MOTOR_IZQ_ENA, velIzq);
+  
+  digitalWrite(MOTOR_DER_IN3, HIGH);
+  digitalWrite(MOTOR_DER_IN4, LOW);
+  analogWrite(MOTOR_DER_ENB, velDer);
+}
+
+void retroceder() {
+  int velIzq = VELOCIDAD_MAXIMA * FACTOR_MOTOR_IZQ;
+  int velDer = VELOCIDAD_MAXIMA * FACTOR_MOTOR_DER;
+  
+  // Retroceder
+  digitalWrite(MOTOR_IZQ_IN1, LOW);
+  digitalWrite(MOTOR_IZQ_IN2, HIGH);
+  analogWrite(MOTOR_IZQ_ENA, velIzq);
+  
+  digitalWrite(MOTOR_DER_IN3, LOW);
+  digitalWrite(MOTOR_DER_IN4, HIGH);
+  analogWrite(MOTOR_DER_ENB, velDer);
+  
+  Serial.println("Retroceder");
+}
+
+void girarDerecha() {
+  int velGiro = VELOCIDAD_GIRO;
+  
+  // Motor izq avanza, motor der retrocede
+  digitalWrite(MOTOR_IZQ_IN1, HIGH);
+  digitalWrite(MOTOR_IZQ_IN2, LOW);
+  analogWrite(MOTOR_IZQ_ENA, velGiro);
+  
+  digitalWrite(MOTOR_DER_IN3, LOW);
+  digitalWrite(MOTOR_DER_IN4, HIGH);
+  analogWrite(MOTOR_DER_ENB, velGiro);
+  
+  Serial.println("Girar DERECHA");
+}
+
+void girarIzquierda() {
+  int velGiro = VELOCIDAD_GIRO;
+  
+  // Motor izq retrocede, motor der avanza
+  digitalWrite(MOTOR_IZQ_IN1, LOW);
+  digitalWrite(MOTOR_IZQ_IN2, HIGH);
+  analogWrite(MOTOR_IZQ_ENA, velGiro);
+  
+  digitalWrite(MOTOR_DER_IN3, HIGH);
+  digitalWrite(MOTOR_DER_IN4, LOW);
+  analogWrite(MOTOR_DER_ENB, velGiro);
+  
+  Serial.println("Girar IZQUIERDA");
+}
+
+void detener() {
+  digitalWrite(MOTOR_IZQ_IN1, LOW);
+  digitalWrite(MOTOR_IZQ_IN2, LOW);
+  analogWrite(MOTOR_IZQ_ENA, 0);
+  
+  digitalWrite(MOTOR_DER_IN3, LOW);
+  digitalWrite(MOTOR_DER_IN4, LOW);
+  analogWrite(MOTOR_DER_ENB, 0);
+  
+  Serial.println("Detener");
+}
